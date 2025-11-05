@@ -564,7 +564,7 @@ def regional_summary(df):
     営業計画を立てやすくなります。
 
     引数:
-        df (pd.DataFrame): 都道府県が抽出されたデータ
+        df (pd.DataFrame): 都道府県が抽出・補完されたデータ
 
     戻り値:
         dict: 地域別集計結果
@@ -573,6 +573,16 @@ def regional_summary(df):
     print("\n" + "="*70)
     print("【ステップ8】地域別集計")
     print("="*70)
+
+    # 集計対象の確認
+    total_customers = len(df)
+    customers_with_pref = df['都道府県'].notna().sum()
+    customers_without_pref = total_customers - customers_with_pref
+
+    print(f"\n  【集計対象】")
+    print(f"  全顧客数: {total_customers:,} 人")
+    print(f"  都道府県が存在: {customers_with_pref:,} 人 ({customers_with_pref/total_customers*100:.1f}%)")
+    print(f"  都道府県が不明: {customers_without_pref:,} 人 ({customers_without_pref/total_customers*100:.1f}%)")
 
     # A. 東京都在住
     A = (df['都道府県'] == '東京都').sum()
@@ -588,10 +598,15 @@ def regional_summary(df):
     D = ((df['期_番号'] >= PRIORITY_2_PERIOD_MIN) &
          (df['都道府県'].isin(KANTO_NEARBY))).sum()
 
+    print(f"\n  【地域別集計結果】")
     print(f"  A. 東京都在住: {A:,} 人")
     print(f"  B. 埼玉・千葉・神奈川在住: {B:,} 人")
     print(f"  C. 7期以降 + 東京都在住: {C:,} 人")
     print(f"  D. 7期以降 + 近県在住: {D:,} 人")
+
+    # 合計チェック
+    total_regional = A + B
+    print(f"\n  📊 東京都+近県の合計: {total_regional:,} 人（全顧客の{total_regional/total_customers*100:.1f}%）")
 
     return {
         'A': A,
@@ -994,11 +1009,33 @@ def main():
         # ステップ12: Excel出力（4シート構成）
         create_excel_output(df_final, regional_stats)
 
+        # 処理サマリーを表示
         print("\n" + "="*70)
         print("✅ 処理完了！")
         print("="*70)
-        print(f"📊 最終顧客数: {len(df_final):,} 件")
-        print(f"📁 出力ファイル: {OUTPUT_FILE}")
+
+        print(f"\n【処理結果サマリー】")
+        print(f"  📊 最終顧客数: {len(df_final):,} 件")
+
+        # 都道府県データの補完効果
+        pref_count = df_final['都道府県'].notna().sum()
+        pref_rate = pref_count / len(df_final) * 100
+        print(f"  🗺️  都道府県データ: {pref_count:,} 件 ({pref_rate:.1f}%)")
+
+        # アンケート回答者数
+        survey_count = df_final['アンケート回答'].sum()
+        survey_rate = survey_count / len(df_final) * 100
+        print(f"  📋 アンケート回答者: {survey_count:,} 人 ({survey_rate:.1f}%)")
+
+        # 優先順位別の人数
+        priority_counts = df_final['優先順位'].value_counts().sort_index()
+        print(f"\n【優先順位別】")
+        print(f"  優先順位1（12期生）: {priority_counts.get(1, 0):,} 人")
+        print(f"  優先順位2（7～11期+回答）: {priority_counts.get(2, 0):,} 人")
+        print(f"  優先順位3（7～11期+未回答）: {priority_counts.get(3, 0):,} 人")
+        print(f"  優先順位4（1～6期）: {priority_counts.get(4, 0):,} 人")
+
+        print(f"\n  📁 出力ファイル: {OUTPUT_FILE}")
         print("="*70)
 
     except FileNotFoundError as e:
