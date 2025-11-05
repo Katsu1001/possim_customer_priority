@@ -868,11 +868,12 @@ def create_excel_output(df, regional_stats):
                             startrow=len(df_check)+5, index=False, header=False)
 
             # 重複住所の上位10件
+            # ✅ 修正: 3列のDataFrameを正しく作成（順位、住所、件数）
             df_dup_list = pd.DataFrame([
-                {'住所': address if address else '（空欄）', '件数': count, '': '', '': ''}
-                for address, count in duplicates.head(10).items()
+                {'順位': f"{i+1}.", '住所': address if address else '（空欄）', '件数': count}
+                for i, (address, count) in enumerate(duplicates.head(10).items())
             ])
-            df_dup_list.columns = ['住所', '件数', '', '']
+            # 列名はそのまま使用（列名変更は不要）
             df_dup_list.to_excel(writer, sheet_name=OUTPUT_SHEETS['CHECK'],
                                 startrow=len(df_check)+6, index=False)
 
