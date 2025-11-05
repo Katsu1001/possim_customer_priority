@@ -371,6 +371,66 @@ def extract_survey_emails(excel_path, email_column_index=1):
         return set()
 
 
+def extract_survey_data(excel_path, email_column_index=1, name_column_index=2):
+    """
+    Excelアンケートファイルから氏名とメールアドレスを抽出する
+
+    【やっていること】
+    卒業式アンケート（Excel）から、
+    回答者の氏名とメールアドレスを取得します。
+
+    【なぜ必要か】
+    氏名とメールアドレスの両方でマッチングを試みるため、
+    両方の情報を取得する必要があります。
+
+    【処理の流れ】
+    1. Excelファイルを読み込む
+    2. 氏名とメールアドレスの列を取得
+    3. 正規化して返す（氏名は正規化、メールは小文字化）
+
+    引数:
+        excel_path (Path): Excelファイルのパス
+        email_column_index (int): メールアドレスの列番号（デフォルト: 1 = 2列目）
+        name_column_index (int): 氏名の列番号（デフォルト: 2 = 3列目）
+
+    戻り値:
+        dict: {'names': set(氏名セット), 'emails': set(メールセット)}
+
+    使用例:
+        >>> extract_survey_data(Path("HCU7期卒業式アンケート.xlsx"))
+        {'names': {'最上輝未子', ...}, 'emails': {'user@example.com', ...}}
+    """
+    try:
+        # Excelファイルを読み込む
+        df = pd.read_excel(excel_path)
+
+        result = {'names': set(), 'emails': set()}
+
+        # メールアドレスを抽出
+        if email_column_index < len(df.columns):
+            email_col = df.columns[email_column_index]
+            emails = df[email_col].dropna().astype(str).str.lower().str.strip()
+            valid_emails = emails[emails.str.contains('@', na=False)]
+            result['emails'] = set(valid_emails)
+
+        # 氏名を抽出（氏名列が存在する場合）
+        if name_column_index < len(df.columns):
+            name_col = df.columns[name_column_index]
+            names = df[name_col].dropna().astype(str)
+            # 氏名を正規化
+            normalized_names = names.apply(normalize_name)
+            # 空欄を除外
+            valid_names = normalized_names[normalized_names != '']
+            result['names'] = set(valid_names)
+
+        return result
+
+    except Exception as e:
+        # エラーが発生した場合は、警告を表示して空の辞書を返す
+        print(f"  ⚠️ アンケート読み込みエラー: {excel_path.name} - {e}")
+        return {'names': set(), 'emails': set()}
+
+
 # =========================================================================
 # 【5】データ検証関数
 # =========================================================================
@@ -545,3 +605,220 @@ def calculate_priority(row, survey_emails):
     else:
         # 優先順位4: 1～6期
         return 4
+
+
+# =========================================================================
+# 【7】郵便番号から都道府県を補完する関数
+# =========================================================================
+
+def get_prefecture_from_postal_code(postal_code_str, postal_mapping):
+    """
+    郵便番号文字列から都道府県を抽出
+
+    【やっていること】
+    郵便番号の最初の3桁から都道府県を判定します。
+
+    【使用例】
+    get_prefecture_from_postal_code('1001111', POSTAL_CODE_TO_PREFECTURE) → '東京都'
+    get_prefecture_from_postal_code('100-1111', POSTAL_CODE_TO_PREFECTURE) → '東京都'
+    get_prefecture_from_postal_code('9601111', POSTAL_CODE_TO_PREFECTURE) → '福島県'
+
+    【処理の流れ】
+    1. 郵便番号から数字のみを抽出
+    2. 最初の3桁を取得
+    3. マッピング辞書で検索
+    4. マッチした都道府県を返す
+
+    引数:
+        postal_code_str (str): 郵便番号文字列（ハイフンあり・なし両対応）
+        postal_mapping (dict): 郵便番号→都道府県のマッピング辞書
+
+    戻り値:
+        str or None: 都道府県名（見つからない場合はNone）
+    """
+    # 空欄の場合はNoneを返す
+    if pd.isna(postal_code_str) or postal_code_str == '':
+        return None
+
+    # 郵便番号から数字のみを抽出
+    postal_digits = re.sub(r'\D', '', str(postal_code_str))
+
+    if len(postal_digits) < 3:
+        return None
+
+    # 最初の3桁で検索
+    prefix_3digit = postal_digits[:3]
+
+    # マッピング辞書で検索
+    return postal_mapping.get(prefix_3digit, None)
+
+
+def fill_prefecture_from_postal_code(df, postal_code_col='郵便番号_フォーマット', prefecture_col='都道府県'):
+    """
+    【新規機能】郵便番号をもとに都道府県を補完
+
+    【やっていること】
+    郵便番号が存在するが、都道府県が空欄のセルに対して、
+    郵便番号の最初の3桁をもとに、対応する都道府県を自動補完します。
+
+    例:
+    - 郵便番号: 1001234 → 都道府県を「東京都」に補完
+    - 郵便番号: 5301234 → 都道府県を「大阪府」に補完
+    - 郵便番号: 9601234 → 都道府県を「福島県」に補完
+
+    処理フロー:
+    1. 郵便番号→都道府県マッピング辞書を取得（02_config.py から）
+    2. df を走査:
+       - 郵便番号が存在し、都道府県が空欄のレコードを抽出
+       - 郵便番号の最初の3桁から対応する都道府県を検索
+       - マッピング結果を都道府県カラムに記入
+    3. 補完結果をカウント＆ログ出力
+
+    引数:
+        df (DataFrame): 顧客データ
+        postal_code_col (str): 郵便番号カラム名
+        prefecture_col (str): 都道府県カラム名
+
+    戻り値:
+        tuple: (補完済みDF, 補完件数, 補完できなかった件数)
+    """
+    # 02_config.py から郵便番号マッピング辞書をインポート
+    # （この関数が呼ばれる時点で、すでに config_02 モジュールから POSTAL_CODE_TO_PREFECTURE がインポートされている前提）
+    from config_02 import POSTAL_CODE_TO_PREFECTURE
+
+    # 補完前の都道府県データ件数を記録
+    before_count = df[prefecture_col].notna().sum()
+
+    # 郵便番号が存在し、都道府県が空欄のレコードを抽出
+    mask_needs_completion = df[postal_code_col].notna() & df[prefecture_col].isna()
+    needs_completion_count = mask_needs_completion.sum()
+
+    print(f"  📍 郵便番号が存在し、都道府県が空欄: {needs_completion_count:,} 件")
+
+    # 補完を実行
+    completed_count = 0
+    failed_count = 0
+
+    for idx in df[mask_needs_completion].index:
+        postal_code = df.at[idx, postal_code_col]
+        prefecture = get_prefecture_from_postal_code(postal_code, POSTAL_CODE_TO_PREFECTURE)
+
+        if prefecture:
+            df.at[idx, prefecture_col] = prefecture
+            completed_count += 1
+        else:
+            failed_count += 1
+
+    # 補完後の都道府県データ件数
+    after_count = df[prefecture_col].notna().sum()
+
+    return df, completed_count, failed_count
+
+
+# =========================================================================
+# 【8】アンケート紐づけ関数（氏名＋メールアドレス）
+# =========================================================================
+
+def merge_survey_data_enhanced(df_combined, survey_data_dict):
+    """
+    【改善版】アンケート回答者をデータに紐づける
+
+    【改善内容】
+    1. 氏名での紐づけを実行
+    2. 氏名での紐づけに失敗した場合、メールアドレスでも試行
+    3. マッチング結果をログに出力
+
+    処理フロー:
+    1. df_combined に 'アンケート回答' カラムを初期化（False）
+    2. 各調査ファイル（HCU7～11）から氏名とメールを抽出
+    3. df_combined を走査して:
+       - 第1段階: 氏名で完全一致を確認
+       - 第2段階: 氏名未マッチなら、メールで完全一致を確認
+       - マッチ結果をカウント
+    4. ログに以下を出力:
+       ✅ HCU8期: 13件（氏名: 13件, メール: 0件）
+       ✅ HCU9期: 53件（氏名: 50件, メール: 3件）
+       ...
+       📊 総マッチ数: 91件 → ○○件（メールで追加マッチ）
+
+    引数:
+        df_combined (DataFrame): 全期間の顧客データ（氏名が正規化済み）
+        survey_data_dict (dict): {期番号: アンケートファイルパス}
+
+    戻り値:
+        tuple: (アンケート回答フラグが追加されたDF, アンケート回答者のメールセット)
+    """
+    # アンケート回答フラグを初期化
+    df_combined['アンケート回答'] = False
+
+    # 全期の集計用
+    total_name_matches = 0
+    total_email_matches = 0
+    all_survey_emails = set()
+
+    print("\n各期のマッチング結果:")
+
+    # 各期のアンケートファイルを処理
+    for period, filepath in survey_data_dict.items():
+        try:
+            # アンケートデータから氏名とメールアドレスを抽出
+            survey_data = extract_survey_data(filepath)
+            survey_names = survey_data['names']
+            survey_emails = survey_data['emails']
+
+            # この期のマッチング結果をカウント
+            name_match_count = 0
+            email_match_count = 0
+
+            # 氏名でマッチング
+            for name in survey_names:
+                # 氏名が完全一致するレコードを探す
+                mask = (df_combined['氏名_key'] == name) & (~df_combined['アンケート回答'])
+                matched_indices = df_combined[mask].index
+
+                if len(matched_indices) > 0:
+                    # マッチしたレコードにフラグを立てる
+                    df_combined.loc[matched_indices, 'アンケート回答'] = True
+                    name_match_count += len(matched_indices)
+
+            # メールアドレスでマッチング（氏名でマッチしなかったもののみ）
+            for email in survey_emails:
+                # メールアドレスが完全一致し、まだマッチしていないレコードを探す
+                mask = (df_combined['Eメール'] == email) & (~df_combined['アンケート回答'])
+                matched_indices = df_combined[mask].index
+
+                if len(matched_indices) > 0:
+                    # マッチしたレコードにフラグを立てる
+                    df_combined.loc[matched_indices, 'アンケート回答'] = True
+                    email_match_count += len(matched_indices)
+
+            # 全期のメールアドレスセットに追加（優先順位計算用）
+            all_survey_emails.update(survey_emails)
+
+            # この期の結果をログ出力
+            total_matches = name_match_count + email_match_count
+            if email_match_count > 0:
+                print(f"  ✅ HCU{period}期: {total_matches} 件（氏名: {name_match_count}件, メール: {email_match_count}件★）")
+            else:
+                print(f"  ✅ HCU{period}期: {total_matches} 件（氏名: {name_match_count}件, メール: {email_match_count}件）")
+
+            # 全期の集計に加算
+            total_name_matches += name_match_count
+            total_email_matches += email_match_count
+
+        except FileNotFoundError:
+            # ファイルが見つからない場合は警告を表示
+            print(f"  ⚠️ HCU{period}期: ファイルが見つかりません")
+        except Exception as e:
+            # その他のエラー
+            print(f"  ⚠️ HCU{period}期: エラー - {e}")
+
+    # 総マッチ数を計算
+    total_respondents = df_combined['アンケート回答'].sum()
+    total_customers = len(df_combined)
+    response_rate = total_respondents / total_customers * 100
+
+    print(f"\n  📊 アンケート回答者数: {total_respondents:,} 人 / {total_customers:,} 人 ({response_rate:.1f}%)")
+    print(f"     内訳: 氏名マッチ {total_name_matches}件、メールマッチ {total_email_matches}件（新規）")
+
+    return df_combined, all_survey_emails
