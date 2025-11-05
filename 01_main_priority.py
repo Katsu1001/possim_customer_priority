@@ -22,6 +22,7 @@ VHC1～HCU12期の顧客データを処理し、
 9. アンケート情報をマージ（氏名＋メール、改善版）
 10. 優先順位を付与
 11. 電話番号・郵便番号の整形
+11.5. 住所の標準化（ローマ字→日本語、都道府県名補完）
 12. Excel出力（5シート）
 
 【実行方法】
@@ -792,6 +793,97 @@ def format_contact_info(df):
 
 
 # =========================================================================
+# 【ステップ11.5】住所の標準化
+# =========================================================================
+
+def standardize_addresses(df):
+    """
+    住所を標準化する（ローマ字→日本語、都道府県名補完）
+
+    【やっていること】
+    1. ローマ字住所を日本語に変換
+    2. 都道府県名から始まる住所に標準化
+    3. 標準化された住所列を追加
+
+    【なぜこうするのか】
+    住所データの品質を向上させることで、
+    営業活動で使いやすくなります。
+
+    引数:
+        df (pd.DataFrame): 整形後のデータ
+
+    戻り値:
+        pd.DataFrame: 住所標準化後のデータ
+    """
+
+    print("\n" + "="*70)
+    print("【ステップ11.5】住所の標準化")
+    print("="*70)
+
+    # 住所列のコピーを作成
+    df['住所_元'] = df['住所'].copy()
+
+    # 1. ローマ字住所を日本語に変換
+    print("\n  【ローマ字住所を日本語に変換中...】")
+    df['住所'] = df['住所'].apply(convert_romaji_address_to_japanese)
+
+    # 変換された件数をカウント
+    romaji_converted = (df['住所'] != df['住所_元']).sum()
+    if romaji_converted > 0:
+        print(f"  ✅ ローマ字→日本語変換: {romaji_converted:,} 件")
+        # サンプルを表示
+        sample_df = df[df['住所'] != df['住所_元']].head(3)
+        for _, row in sample_df.iterrows():
+            print(f"     例: {row['住所_元']} → {row['住所']}")
+    else:
+        print(f"  ℹ️  ローマ字住所は検出されませんでした")
+
+    # 2. 都道府県名から始まる住所に標準化
+    print("\n  【都道府県名を補完中...】")
+    df['住所（標準化）'] = df.apply(
+        lambda row: standardize_address_with_prefecture(row['住所'], row['都道府県']),
+        axis=1
+    )
+
+    # 標準化された件数をカウント
+    standardized = (df['住所（標準化）'] != df['住所']).sum()
+    if standardized > 0:
+        print(f"  ✅ 都道府県名補完: {standardized:,} 件")
+        # サンプルを表示
+        sample_df = df[df['住所（標準化）'] != df['住所']].head(3)
+        for _, row in sample_df.iterrows():
+            addr_before = row['住所'] if len(str(row['住所'])) < 50 else str(row['住所'])[:50] + '...'
+            addr_after = row['住所（標準化）'] if len(str(row['住所（標準化）'])) < 50 else str(row['住所（標準化）'])[:50] + '...'
+            print(f"     例: {addr_before}")
+            print(f"      → {addr_after}")
+    else:
+        print(f"  ℹ️  全ての住所が既に都道府県名から始まっています")
+
+    # 3. 郵便番号から都道府県を参照（補完用）
+    print("\n  【郵便番号参照住所を作成中...】")
+    df['住所（郵便番号参照）'] = df['郵便番号'].apply(
+        lambda postal: get_prefecture_from_postal_code(postal) if pd.notna(postal) else None
+    )
+
+    # 郵便番号参照で都道府県が取得できた件数
+    postal_ref_count = df['住所（郵便番号参照）'].notna().sum()
+    print(f"  ✅ 郵便番号参照住所: {postal_ref_count:,} 件")
+
+    # 元の住所列は削除
+    df.drop(columns=['住所_元'], inplace=True)
+
+    # データ品質チェック
+    address_with_pref_count = df['住所（標準化）'].notna().sum()
+    address_with_pref_rate = address_with_pref_count / len(df) * 100
+
+    print(f"\n  【住所データ品質】")
+    print(f"  住所（標準化）データ件数: {address_with_pref_count:,} 件 / {len(df):,} 件 ({address_with_pref_rate:.1f}%)")
+    print(f"  郵便番号参照住所データ件数: {postal_ref_count:,} 件 / {len(df):,} 件 ({postal_ref_count/len(df)*100:.1f}%)")
+
+    return df
+
+
+# =========================================================================
 # 【ステップ12】Excel出力（5シート構成）
 # =========================================================================
 
@@ -831,6 +923,8 @@ def create_excel_output(df, regional_stats, df_survey_details):
         'Eメール',
         '郵便番号_フォーマット',
         '住所',
+        '住所（標準化）',
+        '住所（郵便番号参照）',
         '都道府県',
         '受講期',
         'アンケート回答',
@@ -844,6 +938,8 @@ def create_excel_output(df, regional_stats, df_survey_details):
         'メールアドレス',
         '郵便番号',
         '住所',
+        '住所（標準化）',
+        '住所（郵便番号参照）',
         '都道府県',
         '最後に受講した期',
         'アンケート回答',
@@ -887,28 +983,78 @@ def create_excel_output(df, regional_stats, df_survey_details):
         # --- シート4: 各種チェック項目 ---
         print("  📄 各種チェック項目シートを作成中...")
 
+        # 基本データの存在チェック
         phone_count = df['電話番号'].notna().sum()
+        phone_blank = len(df) - phone_count
         phone_rate = phone_count / len(df) * 100
 
         postal_count = df['郵便番号'].notna().sum()
+        postal_blank = len(df) - postal_count
         postal_rate = postal_count / len(df) * 100
 
         address_count = df['住所'].notna().sum()
+        address_blank = len(df) - address_count
         address_rate = address_count / len(df) * 100
 
         pref_count = df['都道府県'].notna().sum()
+        pref_blank = len(df) - pref_count
         pref_rate = pref_count / len(df) * 100
 
         email_count = df['Eメール'].notna().sum()
+        email_blank = len(df) - email_count
         email_rate = email_count / len(df) * 100
 
-        df_check = pd.DataFrame([
-            {'チェック項目': '電話番号データ件数', '件数': phone_count, '全体': len(df), '割合(%)': f'{phone_rate:.1f}'},
-            {'チェック項目': '郵便番号データ件数', '件数': postal_count, '全体': len(df), '割合(%)': f'{postal_rate:.1f}'},
-            {'チェック項目': '住所データ件数', '件数': address_count, '全体': len(df), '割合(%)': f'{address_rate:.1f}'},
-            {'チェック項目': '都道府県データ件数', '件数': pref_count, '全体': len(df), '割合(%)': f'{pref_rate:.1f}'},
-            {'チェック項目': 'メールアドレスデータ件数', '件数': email_count, '全体': len(df), '割合(%)': f'{email_rate:.1f}'},
-        ])
+        name_count = df['氏名'].notna().sum()
+        name_blank = len(df) - name_count
+        name_rate = name_count / len(df) * 100
+
+        # 住所標準化チェック
+        standardized_count = df['住所（標準化）'].notna().sum()
+        standardized_rate = standardized_count / len(df) * 100
+
+        postal_ref_count = df['住所（郵便番号参照）'].notna().sum()
+        postal_ref_rate = postal_ref_count / len(df) * 100
+
+        # ローマ字住所検出（簡易検出：英数字が連続している住所）
+        romaji_pattern = r'[A-Za-z]{3,}'
+        romaji_address_count = df['住所'].fillna('').str.contains(romaji_pattern, regex=True).sum()
+
+        # メールアドレス重複チェック
+        email_duplicates = df[df['Eメール'].notna()]['Eメール'].value_counts()
+        email_dup_count = (email_duplicates > 1).sum()
+
+        # 電話番号重複チェック
+        phone_duplicates = df[df['電話番号'].notna()]['電話番号'].value_counts()
+        phone_dup_count = (phone_duplicates > 1).sum()
+
+        # アンケート回答者数
+        survey_response_count = df['アンケート回答'].sum()
+        survey_response_rate = survey_response_count / len(df) * 100
+
+        # チェック項目リストを作成
+        check_items = [
+            # 基本データ存在チェック
+            {'カテゴリ': '基本データ', 'チェック項目': '氏名データ件数', '件数': name_count, '空欄': name_blank, '全体': len(df), '割合(%)': f'{name_rate:.1f}'},
+            {'カテゴリ': '基本データ', 'チェック項目': 'メールアドレスデータ件数', '件数': email_count, '空欄': email_blank, '全体': len(df), '割合(%)': f'{email_rate:.1f}'},
+            {'カテゴリ': '基本データ', 'チェック項目': '電話番号データ件数', '件数': phone_count, '空欄': phone_blank, '全体': len(df), '割合(%)': f'{phone_rate:.1f}'},
+            {'カテゴリ': '基本データ', 'チェック項目': '郵便番号データ件数', '件数': postal_count, '空欄': postal_blank, '全体': len(df), '割合(%)': f'{postal_rate:.1f}'},
+            {'カテゴリ': '基本データ', 'チェック項目': '住所データ件数', '件数': address_count, '空欄': address_blank, '全体': len(df), '割合(%)': f'{address_rate:.1f}'},
+            {'カテゴリ': '基本データ', 'チェック項目': '都道府県データ件数', '件数': pref_count, '空欄': pref_blank, '全体': len(df), '割合(%)': f'{pref_rate:.1f}'},
+
+            # 住所品質チェック
+            {'カテゴリ': '住所品質', 'チェック項目': '住所（標準化）データ件数', '件数': standardized_count, '空欄': len(df) - standardized_count, '全体': len(df), '割合(%)': f'{standardized_rate:.1f}'},
+            {'カテゴリ': '住所品質', 'チェック項目': '住所（郵便番号参照）データ件数', '件数': postal_ref_count, '空欄': len(df) - postal_ref_count, '全体': len(df), '割合(%)': f'{postal_ref_rate:.1f}'},
+            {'カテゴリ': '住所品質', 'チェック項目': 'ローマ字住所検出件数', '件数': romaji_address_count, '空欄': '-', '全体': len(df), '割合(%)': f'{romaji_address_count/len(df)*100:.1f}'},
+
+            # 重複チェック
+            {'カテゴリ': '重複チェック', 'チェック項目': 'メールアドレス重複', '件数': email_dup_count, '空欄': '-', '全体': email_count, '割合(%)': f'{email_dup_count/email_count*100:.1f}' if email_count > 0 else '0.0'},
+            {'カテゴリ': '重複チェック', 'チェック項目': '電話番号重複', '件数': phone_dup_count, '空欄': '-', '全体': phone_count, '割合(%)': f'{phone_dup_count/phone_count*100:.1f}' if phone_count > 0 else '0.0'},
+
+            # アンケート回答
+            {'カテゴリ': 'アンケート', 'チェック項目': 'アンケート回答者数', '件数': survey_response_count, '空欄': len(df) - survey_response_count, '全体': len(df), '割合(%)': f'{survey_response_rate:.1f}'},
+        ]
+
+        df_check = pd.DataFrame(check_items)
         df_check.to_excel(writer, sheet_name=OUTPUT_SHEETS['CHECK'], index=False)
 
         # 住所の重複情報を追加
@@ -916,20 +1062,20 @@ def create_excel_output(df, regional_stats, df_survey_details):
         duplicates = address_counts[address_counts > 1]
 
         if len(duplicates) > 0:
-            # 空行を追加
-            df_empty = pd.DataFrame([[''] * 4], columns=['チェック項目', '件数', '全体', '割合(%)'])
+            # 空行を追加（新しいカラム数5に合わせる）
+            df_empty = pd.DataFrame([[''] * 5], columns=['カテゴリ', 'チェック項目', '件数', '空欄', '全体'])
             df_empty.to_excel(writer, sheet_name=OUTPUT_SHEETS['CHECK'],
                             startrow=len(df_check)+2, index=False, header=False)
 
             # 重複住所のタイトル
-            df_dup_title = pd.DataFrame([['【住所の重複チェック】', '', '', '']],
-                                       columns=['チェック項目', '件数', '全体', '割合(%)'])
+            df_dup_title = pd.DataFrame([['住所重複', '【住所の重複リスト】', '', '', '']],
+                                       columns=['カテゴリ', 'チェック項目', '件数', '空欄', '全体'])
             df_dup_title.to_excel(writer, sheet_name=OUTPUT_SHEETS['CHECK'],
                                  startrow=len(df_check)+3, index=False, header=False)
 
             # 重複住所の情報
-            df_dup_info = pd.DataFrame([[f'⚠️ 重複住所が {len(duplicates):,} 件見つかりました', '', '', '']],
-                                      columns=['チェック項目', '件数', '全体', '割合(%)'])
+            df_dup_info = pd.DataFrame([['住所重複', f'⚠️ 重複住所が {len(duplicates):,} 件見つかりました', '', '', '']],
+                                      columns=['カテゴリ', 'チェック項目', '件数', '空欄', '全体'])
             df_dup_info.to_excel(writer, sheet_name=OUTPUT_SHEETS['CHECK'],
                                 startrow=len(df_check)+4, index=False, header=False)
 
@@ -984,6 +1130,7 @@ def main():
     9. アンケート情報をマージ（氏名＋メールアドレス、改善版）
     10. 優先順位を付与
     11. 電話番号・郵便番号の整形と住所の作成
+    11.5. 住所の標準化（ローマ字→日本語、都道府県名補完）
     12. Excel出力（5シート構成）
     """
 
@@ -1027,7 +1174,10 @@ def main():
         df_with_priority = assign_priority(df_with_survey, survey_emails)
 
         # ステップ11: 電話番号・郵便番号の整形と住所の作成
-        df_final = format_contact_info(df_with_priority)
+        df_formatted = format_contact_info(df_with_priority)
+
+        # ステップ11.5: 住所の標準化
+        df_final = standardize_addresses(df_formatted)
 
         # ステップ12: Excel出力（5シート構成）
         create_excel_output(df_final, regional_stats, df_survey_details)
