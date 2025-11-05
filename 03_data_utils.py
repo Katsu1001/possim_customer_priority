@@ -822,3 +822,86 @@ def merge_survey_data_enhanced(df_combined, survey_data_dict):
     print(f"     内訳: 氏名マッチ {total_name_matches}件、メールマッチ {total_email_matches}件（新規）")
 
     return df_combined, all_survey_emails
+
+
+def generate_survey_response_details(df_combined, survey_data_dict):
+    """
+    アンケート回答詳細データを生成する
+
+    【目的】
+    アンケート回答者の詳細情報を一覧化し、
+    マッチング方法（氏名/メール/未マッチ）を明示する
+
+    【出力カラム】
+    - 氏名（顧客）
+    - メールアドレス（顧客）
+    - 氏名（アンケート）
+    - メールアドレス（アンケート）
+    - マッチング方法
+    - アンケート回答期
+    - アンケート回答フラグ
+
+    引数:
+        df_combined (DataFrame): 全期間の顧客データ（マッチング済み）
+        survey_data_dict (dict): {期番号: アンケートファイルパス}
+
+    戻り値:
+        DataFrame: アンケート回答詳細データ
+    """
+    detail_records = []
+
+    # 各期のアンケートファイルを処理
+    for period, filepath in survey_data_dict.items():
+        try:
+            # アンケートデータから氏名とメールアドレスを抽出
+            survey_data = extract_survey_data(filepath)
+            survey_names = survey_data['names']
+            survey_emails = survey_data['emails']
+
+            # アンケート回答者ごとに処理
+            # 1. 氏名でマッチング確認
+            for survey_name in survey_names:
+                mask = df_combined['氏名_key'] == survey_name
+                matched_customers = df_combined[mask]
+
+                if len(matched_customers) > 0:
+                    for _, customer in matched_customers.iterrows():
+                        detail_records.append({
+                            '氏名（顧客）': customer.get('氏名', ''),
+                            'メールアドレス（顧客）': customer.get('Eメール', ''),
+                            '氏名（アンケート）': survey_name,
+                            'メールアドレス（アンケート）': '',  # 氏名マッチ時はメール不明
+                            'マッチング方法': '氏名',
+                            'アンケート回答期': f'HCU{period}',
+                            'アンケート回答フラグ': '○'
+                        })
+
+            # 2. メールアドレスでマッチング確認（氏名でマッチしなかったもののみ）
+            for survey_email in survey_emails:
+                mask = (df_combined['Eメール'] == survey_email) & \
+                       (~df_combined['氏名_key'].isin(survey_names))
+                matched_customers = df_combined[mask]
+
+                if len(matched_customers) > 0:
+                    for _, customer in matched_customers.iterrows():
+                        detail_records.append({
+                            '氏名（顧客）': customer.get('氏名', ''),
+                            'メールアドレス（顧客）': customer.get('Eメール', ''),
+                            '氏名（アンケート）': '',  # メールマッチ時は氏名不明
+                            'メールアドレス（アンケート）': survey_email,
+                            'マッチング方法': 'メール',
+                            'アンケート回答期': f'HCU{period}',
+                            'アンケート回答フラグ': '○'
+                        })
+
+        except Exception as e:
+            print(f"  ⚠️ HCU{period}期の詳細データ生成エラー: {e}")
+
+    # DataFrameに変換
+    df_details = pd.DataFrame(detail_records)
+
+    # 重複を削除（同じ顧客が複数期に回答している場合）
+    if len(df_details) > 0:
+        df_details = df_details.drop_duplicates(subset=['氏名（顧客）', 'メールアドレス（顧客）'], keep='first')
+
+    return df_details
