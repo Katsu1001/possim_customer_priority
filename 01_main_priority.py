@@ -27,7 +27,7 @@ VHC1～HCU12期の顧客データを処理し、
 python 01_main_priority.py
 
 【作成者】
-Claude Code
+KATSUMI KURAHASHI
 
 【最終更新日】
 2025-11-05

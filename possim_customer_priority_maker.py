@@ -17,7 +17,7 @@ Excel（4シート構成）
   - シート4: 各種チェック項目
 
 【作成者】
-Claude Code
+KATSUMI KURAHASHI
 
 【最終更新日】
 2025-11-05
