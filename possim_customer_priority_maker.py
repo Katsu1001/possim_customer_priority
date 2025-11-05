@@ -987,10 +987,9 @@ def create_excel_output(df, regional_stats):
 
             # 重複住所の上位10件
             df_dup_list = pd.DataFrame([
-                {'住所': address if address else '（空欄）', '件数': count, '': '', '': ''}
+                [address if address else '（空欄）', count, '', '']
                 for address, count in duplicates.head(10).items()
-            ])
-            df_dup_list.columns = ['住所', '件数', '', '']
+            ], columns=['住所', '件数', '', ' '])
             df_dup_list.to_excel(writer, sheet_name='各種チェック項目',
                                 startrow=len(df_check)+6, index=False)
 
