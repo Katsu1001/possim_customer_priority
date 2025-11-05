@@ -46,27 +46,77 @@ possim_customer_priority/
 └── possim_customer_priority_maker.py
 ```
 
-### ステップ2: 必要なライブラリをインストールする
+### ステップ2: 仮想環境を作成する（重要）
 
-Windowsの場合はコマンドプロンプト、Macの場合はターミナルを開いて、以下のコマンドを実行してください：
+ツールを動かすために、まず「仮想環境」という専用の作業スペースを作成します。これにより、パソコンの他のプログラムに影響を与えずに必要なライブラリをインストールできます。
+
+#### Windowsの場合
+
+コマンドプロンプトまたはPowerShellを開いて、以下のコマンドを実行してください：
 
 ```bash
-pip install -r requirements.txt
+# 仮想環境を作成
+python -m venv venv
+
+# 仮想環境を有効化
+venv\Scripts\activate
 ```
 
-このコマンドで、ツールを動かすために必要なプログラム部品が自動的にインストールされます。
+#### Macの場合
 
-### ステップ3: ツールを実行する
+ターミナルを開いて、以下のコマンドを実行してください：
 
-コマンドプロンプト（またはターミナル）で以下のコマンドを実行してください：
+```bash
+# 仮想環境を作成
+python3 -m venv venv
+
+# 仮想環境を有効化
+source venv/bin/activate
+```
+
+**成功すると**：プロンプトの先頭に `(venv)` という表示が出ます。これが表示されていれば仮想環境が有効になっています。
+
+### ステップ3: 必要なライブラリをインストールする
+
+仮想環境を有効化した状態で、以下のコマンドを実行してください：
+
+#### Windowsの場合
+
+```bash
+python -m pip install -r requirements.txt
+```
+
+#### Macの場合
+
+```bash
+python3 -m pip install -r requirements.txt
+```
+
+**トラブルシューティング**：
+- もし `externally-managed-environment` というエラーが出た場合は、`pip` ではなく `python -m pip` または `python3 -m pip` を使用してください
+- エラーが続く場合は、一度 `deactivate` コマンドで仮想環境を無効化し、ステップ2からやり直してください
+
+このコマンドで、ツールを動かすために必要なプログラム部品（pandas、numpy、openpyxlなど）が自動的にインストールされます。
+
+### ステップ4: ツールを実行する
+
+仮想環境が有効化された状態（プロンプトに `(venv)` が表示されている状態）で、以下のコマンドを実行してください：
+
+#### Windowsの場合
 
 ```bash
 python possim_customer_priority_maker.py
 ```
 
+#### Macの場合
+
+```bash
+python3 possim_customer_priority_maker.py
+```
+
 実行すると、画面に処理の進行状況が表示されます。すべて完了すると「処理が完了しました」というメッセージが表示されます。
 
-### ステップ4: 作成されたファイルを確認する
+### ステップ5: 作成されたファイルを確認する
 
 `output`フォルダの中に `POSSIM_顧客リスト_優先順位付き.xlsx` というExcelファイルが作成されています。
 このファイルを開いて内容を確認してください。
@@ -218,6 +268,69 @@ df_dedup = df_sorted.drop_duplicates(subset=['Eメール'], keep='first')
 - **11桁の場合**: 090-1234-5678 の形式に整形
 - **10桁の場合**: 03-1234-5678 の形式に整形
 - **その他**: 元のままの形で残す
+
+## 🔧 トラブルシューティング
+
+### Q1: `externally-managed-environment` というエラーが出る
+
+**原因**：システムのPythonに直接パッケージをインストールしようとしています。
+
+**解決策**：
+1. 仮想環境が正しく有効化されているか確認（プロンプトに `(venv)` が表示されているか）
+2. `pip` ではなく `python -m pip` または `python3 -m pip` を使用
+3. それでも解決しない場合は、仮想環境を再作成：
+   ```bash
+   # 仮想環境を無効化
+   deactivate
+
+   # 古い仮想環境を削除
+   rm -rf venv    # Mac/Linux
+   rmdir /s venv  # Windows
+
+   # 仮想環境を再作成（ステップ2から）
+   ```
+
+### Q2: `python: command not found` というエラーが出る
+
+**原因**：Pythonがインストールされていないか、パスが通っていません。
+
+**解決策**：
+- **Windows**: Python公式サイトからPythonをインストール（https://www.python.org/downloads/）
+- **Mac**: `brew install python3` または公式サイトからインストール
+
+### Q3: 仮想環境をアクティベートしても `(venv)` が表示されない
+
+**原因**：アクティベートコマンドが正しく実行されていません。
+
+**解決策**：
+- **Windows**: `venv\Scripts\activate` を実行（`venv/Scripts/activate` ではない）
+- **Mac**: `source venv/bin/activate` を実行（`source` を忘れない）
+
+### Q4: 実行時に「ファイルが見つかりません」というエラーが出る
+
+**原因**：必要なCSVファイルやExcelファイルが正しい場所に配置されていません。
+
+**解決策**：
+1. `customer_list/` フォルダに全ての顧客データCSVファイルがあるか確認
+2. `surveys/` フォルダに全てのアンケートExcelファイルがあるか確認
+3. ファイル名が正確に一致しているか確認（日付部分も含めて）
+
+### Q5: 次回以降、どうやってツールを実行すればいい？
+
+ツールを使用するたびに、以下の手順を実行してください：
+
+1. **仮想環境を有効化**
+   - Windows: `venv\Scripts\activate`
+   - Mac: `source venv/bin/activate`
+
+2. **ツールを実行**
+   - Windows: `python possim_customer_priority_maker.py`
+   - Mac: `python3 possim_customer_priority_maker.py`
+
+3. **作業が終わったら無効化**（任意）
+   - `deactivate`
+
+**注意**：仮想環境の作成（ステップ2）は最初の1回だけで、2回目以降は不要です。
 
 ## 📝 このツールについて
 
