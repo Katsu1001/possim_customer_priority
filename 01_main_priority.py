@@ -862,7 +862,7 @@ def standardize_addresses(df):
     # 3. 郵便番号から都道府県を参照（補完用）
     print("\n  【郵便番号参照住所を作成中...】")
     df['住所（郵便番号参照）'] = df['郵便番号'].apply(
-        lambda postal: get_prefecture_from_postal_code(postal) if pd.notna(postal) else None
+        lambda postal: get_prefecture_from_postal_code(postal, POSTAL_CODE_TO_PREFECTURE) if pd.notna(postal) else None
     )
 
     # 郵便番号参照で都道府県が取得できた件数
